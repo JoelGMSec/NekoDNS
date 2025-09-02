@@ -14,7 +14,7 @@ Communication is performed through DNS queries (AAAA/A records) that carry comma
 - ⚡ **Flow control**: Adjustable chunk size and sleep interval (`-l`, `-i`)
 - 📂 **File management**: Built-in **upload/download** support
 - 💻 **Cross-platform**: Linux (Bash) and Windows (PowerShell) clients
-- 🐱 **Integration**: Fully integrated into Kitsune (https://github.com/JoelGMSec/Kitsune)
+- 🐱 **Fully integrated** into Kitsune (https://github.com/JoelGMSec/Kitsune)
 - 🔑 **Privilege escalation support** with `sudo`/`su` in Linux
 - 📜 **Import PowerShell scripts** directly on Windows clients (`import-ps1`)
 
@@ -34,7 +34,7 @@ pip install -r requirements.txt
 
 ## 🚀 Usage
 
-```bash
+```java
 python3 NekoDNS.py -h             
 
   _   _      _         ____  _   _ ____  
