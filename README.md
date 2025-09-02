@@ -4,7 +4,7 @@
 
 ### Experimental Reverse DNS Shell
 
-NekoDNS is an experimental Reverse DNS Shell that leverages **DNS resolutions** to establish a covert shell over UDP or TCP.  
+NekoDNS is an experimental tool that leverages **DNS resolutions** to establish a Reverse Shell over DNS.  
 Communication is performed through DNS queries (AAAA/A records) that carry commands and responses as fragmented and reversed hexadecimal data, making detection by automated tools very difficult. The project provides a **server (Python)** and clients in **Bash (Linux)** and **PowerShell (Windows)** to support different environments.
 
 
@@ -17,8 +17,6 @@ Communication is performed through DNS queries (AAAA/A records) that carry comma
 - 🐱 **Integration**: Fully integrated into Kitsune (https://github.com/JoelGMSec/Kitsune)
 - 🔑 **Privilege escalation support** with `sudo`/`su` in Linux
 - 📜 **Import PowerShell scripts** directly on Windows clients (`import-ps1`)
-
----
 
 
 ## ⚙️ Requirements
@@ -74,6 +72,7 @@ python3 NekoDNS.py -h
 ## 🗂️ Documentation
 
 The detailed guide of use can be found at the following link:
+
 https://darkbyte.net/nekodns-jugando-con-dns-una-vez-mas
 
 
@@ -91,7 +90,7 @@ Other ways to contact me on my blog [darkbyte.net](https://darkbyte.net)
 
 ## ⚠️ Disclaimer
 
-This software comes with no warranty, it is intended exclusively for educational purposes and authorized security audits.
+This software comes with no warranty, exclusively for educational purposes and authorized security audits.
 
 The author is not responsible for any misuse or damage caused by this software.
 
