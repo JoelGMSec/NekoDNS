@@ -51,18 +51,19 @@ python3 NekoDNS.py -h
 ```
 
 **Arguments**:
-- `<listen_ip>`: IP address to listen (0.0.0.0 by default)  
-- `<listen_port>`: Port to listen (53 by default)  
-- `<-udp/-tcp>`: Protocol to use (UDP or TCP)  
+- `<listen_ip>` → IP address to listen (0.0.0.0 by default)  
+- `<listen_port>` → Port to listen (53 by default)  
+- `<-udp/-tcp>` → Protocol to use (UDP or TCP)  
 
 **Available Commands**:
-- `upload "local_file" "remote_file"`: → Upload a file to the client
-- `download "remote_file" "local_file"`: → Download a file from the client
-- `import-ps1 "script.ps1"`: → Import a PowerShell script on Windows clients
-- `sudo "command"`: → Execute with elevated privileges on Linux
-- `clear / cls`: → Clear terminal screen
-- `kill`: → Kill the client connection
-- `exit`: → Close the session 
+- `upload` → Upload a file from local to remote computer
+- `download` → Download a file from remote to local computer
+- `import-ps1` → Import PowerShell script on Windows hosts
+- `sudo` → Execute with sudo privileges on Linux hosts
+- `clear/cls` → Clear terminal screen
+- `kill` → Kill client connection
+- `exit` → Exit from program
+
 
 ## 📸 Screenshots
 
